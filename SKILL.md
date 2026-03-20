@@ -81,22 +81,30 @@
 
 **Step 2: 循环抓取（每批次）**
 ```python
-for batch in batches:
+for i, batch in enumerate(batches):
     # 1. 抓取当前批次（3个账号）
     fetch_batch(batch)
     
     # 2. 去重检查
     new_posts = deduplicate(fetched_posts, existing_posts)
     
-    # 3. 如果有新内容，追加到文档
+    # 3. 追加到文档并推送通知
     if new_posts:
         append_to_document(new_posts)
-        send_notification(batch_num, new_posts_count, doc_link)
+        # 发送通知但不等待用户回复
+        send_notification(batch_num=i+1, new_posts_count=len(new_posts), doc_link=doc_link)
     
-    # 4. 间隔等待（最后一批除外）
-    if not is_last_batch:
-        sleep(30-60 seconds)
+    # 4. 自动间隔等待（最后一批除外）
+    # ⚠️ 重要：使用 sleep 自动等待，不需要用户确认
+    if i < len(batches) - 1:
+        sleep(30)  # 自动等待30秒，继续下一批次
 ```
+
+**关键说明**：
+- ✅ 每批次完成后**自动**推送消息给用户
+- ✅ 使用 `sleep 30` **自动等待**，不阻塞执行
+- ✅ **不需要用户回复确认**，自动继续下一批次
+- ✅ 用户会收到每批次的进度通知，但无需操作
 
 **Step 3: 完成推送**
 - 发送最终总结消息
