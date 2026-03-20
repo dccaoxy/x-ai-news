@@ -365,6 +365,98 @@ batches = [
 }
 ```
 
+---
+
+## 📝 执行记录机制（防止重复创建文档）
+
+### 执行记录文件
+
+**位置**: `/Users/caoxy/.openclaw/agents/news-officer/x_ai_news_config.json`
+
+**作用**: 记录首次创建的飞书文档信息，后续执行都更新同一文档
+
+**内容示例**:
+```json
+{
+  "first_execution": "2026-03-20T12:00:00+08:00",
+  "execution_count": 5,
+  "doc_token": "D2THdz61yoR3qzxDFFMcCQgYnHd",
+  "doc_url": "https://feishu.cn/docx/D2THdz61yoR3qzxDFFMcCQgYnHd",
+  "doc_title": "🤖 X AI News - AI大神动态汇总",
+  "history": [
+    {
+      "execution": 1,
+      "time": "2026-03-20T12:00:00+08:00",
+      "batches": [1, 2, 3],
+      "tweets": 25
+    },
+    {
+      "execution": 2,
+      "time": "2026-03-20T14:30:00+08:00",
+      "batches": [4, 5],
+      "tweets": 18
+    }
+  ]
+}
+```
+
+### 执行流程（带执行记录）
+
+```python
+def execute_skill():
+    # 1. 检查执行记录
+    config = read_config()
+    
+    if config.exists():
+        # 使用已有文档
+        doc_token = config.doc_token
+        execution_count = config.execution_count + 1
+        print(f"第 {execution_count} 次执行，更新已有文档")
+    else:
+        # 首次执行，创建新文档
+        doc = create_feishu_doc()
+        doc_token = doc.token
+        config = {
+            "first_execution": now(),
+            "execution_count": 1,
+            "doc_token": doc_token,
+            "doc_url": doc.url,
+            "history": []
+        }
+        save_config(config)
+        print(f"首次执行，创建新文档: {doc.url}")
+    
+    # 2. 执行抓取
+    results = fetch_batches()
+    
+    # 3. 更新文档
+    update_feishu_doc(doc_token, results)
+    
+    # 4. 记录执行历史
+    config.history.append({
+        "execution": config.execution_count,
+        "time": now(),
+        "batches": results.batches,
+        "tweets": results.tweet_count
+    })
+    save_config(config)
+```
+
+### 关键规则
+
+1. **首次执行**: 创建飞书文档，记录 doc_token
+2. **后续执行**: 读取 config，使用已有 doc_token 更新同一文档
+3. **执行计数**: 每次执行 +1，记录在历史中
+4. **断点续传**: 结合 job_list.json，从上次中断处继续
+
+### 文件位置
+
+| 文件 | 位置 | 作用 |
+|------|------|------|
+| `x_ai_news_config.json` | `~/.openclaw/agents/news-officer/` | 执行记录、文档链接 |
+| `job_list.json` | `~/.openclaw/agents/news-officer/` | 批次进度、当前状态 |
+| `x_ai_news.log` | `~/.openclaw/agents/news-officer/` | 执行日志（可选） |
+
 ### Heartbeat 检查逻辑
 
 ```python
