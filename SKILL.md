@@ -324,11 +324,69 @@ batches = [
 
 ---
 
+## 💓 Heartbeat 自动续传机制
+
+### 机制说明
+
+为防止长时间任务中断，Skill 执行时自动设置 Heartbeat 任务：
+
+**执行流程：**
+```
+1. 开始执行 Skill
+   ↓
+2. 创建 job_list.json 记录进度
+   ↓
+3. 设置 Heartbeat 检查（每5分钟）
+   ↓
+4. 执行批次抓取
+   ↓
+5. 如果中断：
+   - Heartbeat 检测到未完成任务
+   - 自动继续执行
+   ↓
+6. 全部完成后：
+   - 更新 job_list.json 为完成状态
+   - 终止 Heartbeat 检查
+```
+
+### Job List 文件
+
+**位置**: `job_list.json`
+
+**内容示例**:
+```json
+{
+  "task": "x-ai-news",
+  "total_batches": 8,
+  "completed_batches": [1, 2],
+  "current_batch": 3,
+  "status": "running",
+  "doc_token": "YOUR_DOC_TOKEN"
+}
+```
+
+### Heartbeat 检查逻辑
+
+```python
+# Heartbeat 每5分钟执行
+def heartbeat_check():
+    job = read_job_list()
+    if job.status == "running" and job.current_batch <= job.total_batches:
+        # 有未完成任务，自动继续
+        continue_fetching(job.current_batch)
+    elif job.status == "completed":
+        # 任务完成，跳过
+        pass
+```
+
+---
+
 ## 📁 文件结构
 
 ```
 skills/x-ai-news/
-└── SKILL.md          # 本文件
+├── SKILL.md          # 本文件
+└── job_list.json     # 任务状态文件（自动创建）
 ```
 
 ---
@@ -339,4 +397,5 @@ skills/x-ai-news/
 - 新增：分批抓取+间隔控制机制
 - 新增：每批次实时推送功能
 - 新增：智能去重逻辑
+- 新增：Heartbeat 自动续传机制
 - 优化：反爬策略（页面停留、批次间隔）
