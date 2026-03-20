@@ -159,24 +159,48 @@ for post in fetched_posts:
 | `batch_interval` | 30-60秒 | 批次间间隔 |
 | `profile` | openclaw | 浏览器配置 |
 
-### 操作流程
+### 操作流程（⚠️ 必须严格遵循）
 
 ```bash
 # 1. 打开账号页面
 browser action=open profile=openclaw url=https://x.com/{账号}
+# 返回 targetId，必须保存用于后续关闭
 
 # 2. 等待加载（5秒）
 exec sleep 5
 
 # 3. 获取快照
-browser action=snapshot profile=openclaw targetId={id}
+browser action=snapshot profile=openclaw targetId={targetId}
 
 # 4. 停留3-5秒（模拟阅读）
 exec sleep 3
 
-# 5. 关闭页面（释放资源）
-browser action=close profile=openclaw targetId={id}
+# 5. 【强制】关闭页面（释放资源）
+# ⚠️ 必须执行，否则会导致浏览器标签页堆积
+browser action=close profile=openclaw targetId={targetId}
 ```
+
+### 🚨 资源释放规范
+
+**必须关闭页面的情况**：
+- ✅ 每个账号抓取完成后立即关闭
+- ✅ 批次内所有账号抓取完成后检查并关闭残留
+- ✅ 任务中断/异常时清理所有已打开页面
+- ✅ 子代理执行时必须传递 targetId 并确保关闭
+
+**检查命令**：
+```bash
+# 检查当前所有标签页
+browser action=tabs profile=openclaw
+
+# 批量关闭所有 X 相关页面（清理用）
+# 遍历 tabs 结果，关闭所有 url 包含 x.com 的页面
+```
+
+**子代理执行要求**：
+- 子代理必须在 `finally` 块或确保执行的代码段中关闭页面
+- 父代理应在子代理完成后检查并清理残留标签页
+- 记录每个打开的 targetId，确保可追溯关闭
 
 ---
 
@@ -400,46 +424,76 @@ batches = [
 }
 ```
 
-### 执行流程（带执行记录）
+### 执行流程（带执行记录和资源清理）
 
 ```python
 def execute_skill():
-    # 1. 检查执行记录
-    config = read_config()
+    opened_tabs = []  # 记录所有打开的页面 targetId
     
-    if config.exists():
-        # 使用已有文档
-        doc_token = config.doc_token
-        execution_count = config.execution_count + 1
-        print(f"第 {execution_count} 次执行，更新已有文档")
-    else:
-        # 首次执行，创建新文档
-        doc = create_feishu_doc()
-        doc_token = doc.token
-        config = {
-            "first_execution": now(),
-            "execution_count": 1,
-            "doc_token": doc_token,
-            "doc_url": doc.url,
-            "history": []
-        }
+    try:
+        # 1. 检查执行记录
+        config = read_config()
+        
+        if config.exists():
+            doc_token = config.doc_token
+            execution_count = config.execution_count + 1
+        else:
+            doc = create_feishu_doc()
+            doc_token = doc.token
+            config = {
+                "first_execution": now(),
+                "execution_count": 1,
+                "doc_token": doc_token,
+                "doc_url": doc.url,
+                "history": []
+            }
+            save_config(config)
+        
+        # 2. 执行抓取（记录每个打开的页面）
+        for account in accounts:
+            target_id = browser_open(f"https://x.com/{account}")
+            opened_tabs.append(target_id)  # 记录 targetId
+            
+            sleep(5)
+            content = browser_snapshot(target_id)
+            
+            # 立即关闭页面
+            browser_close(target_id)
+            opened_tabs.remove(target_id)  # 从记录中移除
+        
+        # 3. 更新文档
+        update_feishu_doc(doc_token, results)
+        
+        # 4. 记录执行历史
+        config.history.append({
+            "execution": config.execution_count,
+            "time": now(),
+            "batches": results.batches,
+            "tweets": results.tweet_count
+        })
         save_config(config)
-        print(f"首次执行，创建新文档: {doc.url}")
+        
+    finally:
+        # 5. 【强制】清理所有残留页面
+        cleanup_all_tabs(opened_tabs)
+
+def cleanup_all_tabs(opened_tabs):
+    """清理所有已打开的标签页"""
+    # 关闭记录的页面
+    for target_id in opened_tabs:
+        try:
+            browser_close(target_id)
+        except:
+            pass  # 忽略已关闭的页面错误
     
-    # 2. 执行抓取
-    results = fetch_batches()
-    
-    # 3. 更新文档
-    update_feishu_doc(doc_token, results)
-    
-    # 4. 记录执行历史
-    config.history.append({
-        "execution": config.execution_count,
-        "time": now(),
-        "batches": results.batches,
-        "tweets": results.tweet_count
-    })
-    save_config(config)
+    # 额外检查：关闭所有 X 相关页面
+    all_tabs = browser_list_tabs()
+    for tab in all_tabs:
+        if "x.com" in tab.url and tab.type == "page":
+            try:
+                browser_close(tab.targetId)
+            except:
+                pass
 ```
 
 ### 关键规则
